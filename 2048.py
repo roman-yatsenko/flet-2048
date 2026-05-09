@@ -14,7 +14,7 @@ PADDING = 20
 BOARD_INNER = N * TILE_SIZE + (N + 0.5) * TILE_GAP
 BOARD_OUTER = BOARD_INNER + 2 * TILE_GAP
 WINDOW_WIDTH = BOARD_OUTER + 2 * PADDING
-WINDOW_HEIGHT = BOARD_OUTER + 2 * PADDING + 185
+WINDOW_HEIGHT = BOARD_OUTER + 2 * PADDING + 150
 
 WIN_VALUE = 2048
 
@@ -308,6 +308,54 @@ def main(page: ft.Page) -> None:
 
     game = Game2048()
 
+    stats_dialog = ft.AlertDialog(
+        title=ft.Text("Статистика гри", weight=ft.FontWeight.BOLD),
+        content=ft.Text(""),
+        actions=[ft.Button("Закрити", on_click=lambda e: _close_dialog(e))],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+
+    def _close_dialog(e: ft.ControlEvent) -> None:
+        stats_dialog.open = False
+        page.update()
+
+    page.overlay.append(stats_dialog)
+
+    def build_stats_content() -> ft.Column:
+        """Повертає вміст діалогу зі статистикою гри."""
+        labels = [
+            ("Очки", str(game.score)),
+            ("Рекорд", str(game.best_score)),
+            ("Ходів", str(game.moves)),
+            (
+                "Стан гри",
+                {"playing": "Йде гра", "won": "Перемога!", "lost": "Програш"}.get(
+                    game.state, ""
+                ),
+            ),
+        ]
+        rows = [
+            ft.Row(
+                controls=[
+                    ft.Text(label, size=14, color=ft.Colors.BROWN_500, width=130),
+                    ft.Text(
+                        value,
+                        size=14,
+                        weight=ft.FontWeight.BOLD,
+                        color=ft.Colors.BROWN_500,
+                    ),
+                ]
+            )
+            for label, value in labels
+        ]
+        return ft.Column(controls=rows, spacing=8, tight=True)
+
+    def on_stats_click(e: ft.ControlEvent) -> None:
+        """Обробник кнопки статистики"""
+        stats_dialog.content = build_stats_content()
+        stats_dialog.open = True
+        page.update()
+
     def make_tile(value: int) -> ft.Container:
         """Створює візуальну плитку для заданого значення."""
         return ft.Container(
@@ -429,7 +477,7 @@ def main(page: ft.Page) -> None:
         new_style = ft.ButtonStyle(
             bgcolor={"": t["btn_bg"]}, color={"": ft.Colors.GREY_50}
         )
-        for btn in [restart_btn, themes_btn]:
+        for btn in [restart_btn, themes_btn, stats_btn]:
             btn.style = new_style
         for ctrl in [title_text, score_text, best_text, moves_text, status_text]:
             ctrl.color = t["txt"]
@@ -441,7 +489,12 @@ def main(page: ft.Page) -> None:
         apply_theme()
         refresh_ui()
 
-    restart_btn = ft.Button(content="🔁 New Game", on_click=on_restart, style=btn_style)
+    restart_btn = ft.Button(
+        content="🔁 New Game", on_click=on_restart, style=btn_style, width=145
+    )
+    stats_btn = ft.Button(
+        content="📈 Stats", on_click=on_stats_click, style=btn_style, width=145
+    )
     themes_btn = ft.Button(
         content=theme()["icon"], on_click=on_theme_toggle, style=btn_style
     )
@@ -471,7 +524,11 @@ def main(page: ft.Page) -> None:
     header = ft.Row(
         controls=[
             title_text,
-            restart_btn,
+            ft.Column(
+                controls=[restart_btn, stats_btn],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=8,
+            ),
             ft.Column(
                 controls=[score_text, best_text, moves_text],
                 horizontal_alignment=ft.CrossAxisAlignment.END,
