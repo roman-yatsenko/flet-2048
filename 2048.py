@@ -239,7 +239,9 @@ def main(page: ft.Page) -> None:
             ),
         )
 
-    tile_controls = [[make_tile(game.board[r][c]) for c in range(N)] for r in range(N)]
+    tile_controls: list[list[ft.Container]] = [
+        [make_tile(game.board[r][c]) for c in range(N)] for r in range(N)
+    ]
     score_text = ft.Text(
         f"Очки: {game.score}",
         size=20,
@@ -247,7 +249,7 @@ def main(page: ft.Page) -> None:
         color=ft.Colors.BROWN_500,
     )
     status_text = ft.Text(
-        "Натискайте кнопки",
+        "Стрілки або кнопки для ходу",
         size=13,
         color=ft.Colors.BROWN_500,
         text_align=ft.TextAlign.CENTER,
@@ -318,7 +320,7 @@ def main(page: ft.Page) -> None:
     def on_restart(e: ft.ControlEvent) -> None:
         """Перезапускає гру та оновлює інтерфейс."""
         game.reset()
-        refresh_ui()
+        refresh_ui("Стрілки або кнопки для ходу")
 
     move_btns = ft.Row(
         controls=[
@@ -331,21 +333,20 @@ def main(page: ft.Page) -> None:
         ]
     )
 
+    header = ft.Row(
+        controls=[
+            ft.Text(
+                "2048", size=48, weight=ft.FontWeight.BOLD, color=ft.Colors.BROWN_500
+            ),
+            score_text,
+        ],
+        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+    )
+
     page.add(
         ft.Column(
             controls=[
-                ft.Row(
-                    controls=[
-                        ft.Text(
-                            "2048",
-                            size=48,
-                            weight=ft.FontWeight.BOLD,
-                            color=ft.Colors.BROWN_500,
-                        ),
-                        score_text,
-                    ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                ),
+                header,
                 grid,
                 move_btns,
                 status_text,
