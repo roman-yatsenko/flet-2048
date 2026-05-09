@@ -18,7 +18,7 @@ WINDOW_HEIGHT = BOARD_OUTER + 2 * PADDING + 185
 
 WIN_VALUE = 2048
 
-TILE_COLORS: dict[int, str] = {
+LIGHT_TILES: dict[int | str, ft.Colors] = {
     0: ft.Colors.BROWN_100,
     2: ft.Colors.ORANGE_50,
     4: ft.Colors.ORANGE_100,
@@ -31,6 +31,42 @@ TILE_COLORS: dict[int, str] = {
     512: ft.Colors.AMBER_500,
     1024: ft.Colors.AMBER_600,
     2048: ft.Colors.AMBER_700,
+    "big": ft.Colors.BROWN_900,
+}
+
+DARK_TILES: dict[int | str, ft.Colors] = {
+    0: ft.Colors.BLUE_900,
+    2: ft.Colors.DEEP_PURPLE_700,
+    4: ft.Colors.PURPLE_800,
+    8: ft.Colors.PURPLE_600,
+    16: ft.Colors.PURPLE_500,
+    32: ft.Colors.RED_600,
+    64: ft.Colors.RED_800,
+    128: ft.Colors.ORANGE_600,
+    256: ft.Colors.DEEP_ORANGE_700,
+    512: ft.Colors.AMBER_700,
+    1024: ft.Colors.YELLOW_700,
+    2048: ft.Colors.GREEN_400,
+    "big": ft.Colors.GREY_100,
+}
+
+THEMES: dict[str, dict] = {
+    "light": {
+        "tiles": LIGHT_TILES,
+        "page_bg": ft.Colors.BROWN_50,
+        "board_bg": ft.Colors.BROWN_200,
+        "txt": ft.Colors.BROWN_500,
+        "btn_bg": ft.Colors.BROWN_400,
+        "icon": "🌙",
+    },
+    "dark": {
+        "tiles": DARK_TILES,
+        "page_bg": ft.Colors.BLUE_GREY_900,
+        "board_bg": ft.Colors.INDIGO_900,
+        "txt": ft.Colors.GREY_300,
+        "btn_bg": ft.Colors.DEEP_PURPLE_700,
+        "icon": "☀️",
+    },
 }
 
 # Допоміжні функції
@@ -69,6 +105,11 @@ def tile_font_size(value: int) -> int:
     if value < 1000:
         return 28
     return 22
+
+
+def tile_bg_color(value: int, tiles: dict) -> ft.Colors:
+    """Повертає колір фону плитки за її значенням."""
+    return tiles.get(value, tiles["big"])
 
 
 class Game2048:
@@ -253,11 +294,16 @@ class Game2048:
 
 def main(page: ft.Page) -> None:
     """Головна функція, яка налаштовує вікно та інтерфейс гри."""
+    current_theme: list[str] = ["light"]
+
+    def theme() -> dict:
+        return THEMES[current_theme[0]]
+
     page.title = "2048"
     page.window.width = WINDOW_WIDTH
     page.window.height = WINDOW_HEIGHT
     page.window.resizable = False
-    page.bgcolor = ft.Colors.BROWN_50
+    page.bgcolor = theme()["page_bg"]
     page.padding = ft.Padding.all(PADDING)
 
     game = Game2048()
@@ -267,7 +313,7 @@ def main(page: ft.Page) -> None:
         return ft.Container(
             width=TILE_SIZE,
             height=TILE_SIZE,
-            bgcolor=TILE_COLORS.get(value, ft.Colors.BROWN_900),
+            bgcolor=tile_bg_color(value, theme()["tiles"]),
             border_radius=8,
             alignment=ft.Alignment.CENTER,
             content=ft.Text(
@@ -281,22 +327,28 @@ def main(page: ft.Page) -> None:
     tile_controls: list[list[ft.Container]] = [
         [make_tile(game.board[r][c]) for c in range(N)] for r in range(N)
     ]
+    title_text = ft.Text(
+        "2048",
+        size=48,
+        weight=ft.FontWeight.BOLD,
+        color=theme()["txt"],
+    )
     score_text = ft.Text(
         f"Очки: {game.score}",
         size=20,
         weight=ft.FontWeight.BOLD,
-        color=ft.Colors.BROWN_500,
+        color=theme()["txt"],
     )
     best_text = ft.Text(
-        value=f"Рекорд: {game.best_score}", size=14, color=ft.Colors.BROWN_500
+        value=f"Рекорд: {game.best_score}", size=14, color=theme()["txt"]
     )
     moves_text = ft.Text(
-        value=f"Ходів: {game.best_score}", size=14, color=ft.Colors.BROWN_500
+        value=f"Ходів: {game.best_score}", size=14, color=theme()["txt"]
     )
     status_text = ft.Text(
         "Стрілки - хід. BackSpace - Відміна ходу",
         size=16,
-        color=ft.Colors.BROWN_500,
+        color=theme()["txt"],
         text_align=ft.TextAlign.CENTER,
     )
 
@@ -306,7 +358,7 @@ def main(page: ft.Page) -> None:
             for c in range(N):
                 v = game.board[r][c]
                 tile = tile_controls[r][c]
-                tile.bgcolor = TILE_COLORS.get(v, ft.Colors.BROWN_900)
+                tile.bgcolor = tile_bg_color(v, theme()["tiles"])
                 tile.content.value = str(v) if v else ""
                 tile.content.size = tile_font_size(v)
                 tile.content.color = tile_text_color(v)
@@ -330,13 +382,13 @@ def main(page: ft.Page) -> None:
             ],
             spacing=TILE_GAP,
         ),
-        bgcolor=ft.Colors.BROWN_200,
+        bgcolor=theme()["board_bg"],
         padding=ft.Padding.all(TILE_GAP),
         border_radius=8,
     )
 
     btn_style = ft.ButtonStyle(
-        bgcolor={"": ft.Colors.BROWN_400}, color={"": ft.Colors.GREY_50}
+        bgcolor={"": theme()["btn_bg"]}, color={"": ft.Colors.GREY_50}
     )
 
     def on_move(direction: str):
@@ -369,7 +421,30 @@ def main(page: ft.Page) -> None:
         game.reset()
         refresh_ui("Стрілки або кнопки для ходу")
 
+    def apply_theme() -> None:
+        """Застосовує поточну тему до елементів інтерфейсу."""
+        t = theme()
+        page.bgcolor = t["page_bg"]
+        grid.bgcolor = t["board_bg"]
+        new_style = ft.ButtonStyle(
+            bgcolor={"": t["btn_bg"]}, color={"": ft.Colors.GREY_50}
+        )
+        for btn in [restart_btn, themes_btn]:
+            btn.style = new_style
+        for ctrl in [title_text, score_text, best_text, moves_text, status_text]:
+            ctrl.color = t["txt"]
+        themes_btn.content = t["icon"]
+
+    def on_theme_toggle(e: ft.ControlEvent) -> None:
+        """Обробник перемикання теми"""
+        current_theme[0] = "dark" if current_theme[0] == "light" else "light"
+        apply_theme()
+        refresh_ui()
+
     restart_btn = ft.Button(content="🔁 New Game", on_click=on_restart, style=btn_style)
+    themes_btn = ft.Button(
+        content=theme()["icon"], on_click=on_theme_toggle, style=btn_style
+    )
 
     MOVES = {
         "Arrow Up": game.move_up,
@@ -395,9 +470,7 @@ def main(page: ft.Page) -> None:
 
     header = ft.Row(
         controls=[
-            ft.Text(
-                "2048", size=48, weight=ft.FontWeight.BOLD, color=ft.Colors.BROWN_500
-            ),
+            title_text,
             restart_btn,
             ft.Column(
                 controls=[score_text, best_text, moves_text],
@@ -407,13 +480,16 @@ def main(page: ft.Page) -> None:
         ],
         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
     )
+    status_row = ft.Row(
+        controls=[status_text, themes_btn], alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+    )
 
     page.add(
         ft.Column(
             controls=[
                 header,
                 grid,
-                status_text,
+                status_row,
             ],
             spacing=10,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
