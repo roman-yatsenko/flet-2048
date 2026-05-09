@@ -7,12 +7,43 @@ TILE_SIZE = 100
 TILE_GAP = 10
 PADDING = 20
 
-BOARD_INNER = N * TILE_SIZE + (N + 1) * TILE_GAP
+BOARD_INNER = N * TILE_SIZE + (N + 0.5) * TILE_GAP
 BOARD_OUTER = BOARD_INNER + 2 * TILE_GAP
 WINDOW_WIDTH = BOARD_OUTER + 2 * PADDING
 WINDOW_HEIGHT = BOARD_OUTER + 2 * PADDING + 185
 
 WIN_VALUE = 2048
+
+TILE_COLORS: dict[int, str] = {
+    0: ft.Colors.BROWN_100,
+    2: ft.Colors.ORANGE_50,
+    4: ft.Colors.ORANGE_100,
+    8: ft.Colors.ORANGE_300,
+    16: ft.Colors.DEEP_ORANGE_300,
+    32: ft.Colors.DEEP_ORANGE_400,
+    64: ft.Colors.DEEP_ORANGE_500,
+    128: ft.Colors.AMBER_300,
+    256: ft.Colors.AMBER_400,
+    512: ft.Colors.AMBER_500,
+    1024: ft.Colors.AMBER_600,
+    2048: ft.Colors.AMBER_700,
+}
+
+# Допоміжні функції
+
+
+def tile_text_color(value: int) -> str:
+    """Повертає колір тексту для значення плитки."""
+    return ft.Colors.BROWN_500 if value in (0, 2, 4) else ft.Colors.GREY_50
+
+
+def tile_font_size(value: int) -> int:
+    """Повертає розмір шрифту для значення плитки."""
+    if value < 100:
+        return 36
+    if value < 1000:
+        return 28
+    return 22
 
 
 class Game2048:
@@ -192,20 +223,23 @@ def main(page: ft.Page) -> None:
 
     game = Game2048()
 
-    cell_texts = [
-        [
-            ft.Text(
-                "",
-                size=28,
+    def make_tile(value: int) -> ft.Container:
+        """Створює візуальну плитку для заданого значення."""
+        return ft.Container(
+            width=TILE_SIZE,
+            height=TILE_SIZE,
+            bgcolor=TILE_COLORS.get(value, ft.Colors.BROWN_900),
+            border_radius=8,
+            alignment=ft.Alignment.CENTER,
+            content=ft.Text(
+                value=str(value) if value else "",
+                size=tile_font_size(value),
                 weight=ft.FontWeight.BOLD,
-                color=ft.Colors.BROWN_500,
-                width=TILE_SIZE,
-                text_align=ft.TextAlign.CENTER,
-            )
-            for _ in range(N)
-        ]
-        for _ in range(N)
-    ]
+                color=tile_text_color(value),
+            ),
+        )
+
+    tile_controls = [[make_tile(game.board[r][c]) for c in range(N)] for r in range(N)]
     score_text = ft.Text(
         f"Очки: {game.score}",
         size=20,
@@ -224,7 +258,11 @@ def main(page: ft.Page) -> None:
         for r in range(N):
             for c in range(N):
                 v = game.board[r][c]
-                cell_texts[r][c].value = str(v) if v else "."
+                tile = tile_controls[r][c]
+                tile.bgcolor = TILE_COLORS.get(v, ft.Colors.BROWN_900)
+                tile.content.value = str(v) if v else ""
+                tile.content.size = tile_font_size(v)
+                tile.content.color = tile_text_color(v)
         score_text.value = f"Очки: {game.score}"
         if game.state == "won":
             status_text.value = "YOU WON!"
@@ -239,7 +277,7 @@ def main(page: ft.Page) -> None:
     grid = ft.Container(
         content=ft.Column(
             controls=[
-                ft.Row(controls=cell_texts[r], spacing=TILE_GAP) for r in range(N)
+                ft.Row(controls=tile_controls[r], spacing=TILE_GAP) for r in range(N)
             ],
             spacing=TILE_GAP,
         ),
