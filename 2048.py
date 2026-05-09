@@ -1,6 +1,10 @@
+import json
+import pathlib
 import random
 
 import flet as ft
+
+SAVE_FILE = pathlib.Path(__file__).parent / "2048_save.json"
 
 N = 4
 TILE_SIZE = 100
@@ -32,6 +36,27 @@ TILE_COLORS: dict[int, str] = {
 # Допоміжні функції
 
 
+def load_best_score() -> int:
+    """Завантажує найкращий рахунок із файлу збереження.
+
+    Повертає 0, якщо файл відсутній, містить невалідний JSON або значення
+    `best_score` неможливо перетворити на ціле число.
+    """
+    try:
+        data = json.loads(SAVE_FILE.read_text(encoding="utf-8"))
+        return int(data.get("best_score", 0))
+    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        return 0
+
+
+def save_best_score(score: int) -> None:
+    """Зберігає найкращий рахунок у файл збереження."""
+    SAVE_FILE.write_text(
+        json.dumps({"best_score": score}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
 def tile_text_color(value: int) -> str:
     """Повертає колір тексту для значення плитки."""
     return ft.Colors.BROWN_500 if value in (0, 2, 4) else ft.Colors.GREY_50
@@ -51,6 +76,7 @@ class Game2048:
 
     def __init__(self) -> None:
         """Ініціалізує порожнє поле 4x4 та стартові значення гри."""
+        self.best_score: int = load_best_score()
         self.reset()
 
     def add_random_tile(self) -> None:
@@ -90,7 +116,7 @@ class Game2048:
             if new_row != self.board[r]:
                 changed = True
             self.board[r] = new_row
-        return changed
+        return self._post_move(changed)
 
     def move_right(self) -> bool:
         """Виконує хід вправо для всіх рядків поля.
@@ -109,7 +135,7 @@ class Game2048:
             if new_row != self.board[r]:
                 changed = True
             self.board[r] = new_row
-        return changed
+        return self._post_move(changed)
 
     def move_up(self) -> bool:
         """Виконує хід вгору для всіх стовпців поля.
@@ -128,7 +154,7 @@ class Game2048:
                 changed = True
             for r in range(N):
                 self.board[r][c] = new_col[r]
-        return changed
+        return self._post_move(changed)
 
     def move_down(self) -> bool:
         """Виконує хід вниз для всіх стовпців поля.
@@ -149,7 +175,7 @@ class Game2048:
                 changed = True
             for r in range(N):
                 self.board[r][c] = new_col[r]
-        return changed
+        return self._post_move(changed)
 
     def reset(self) -> None:
         """Скидає гру: очищає поле, обнуляє очки, стан та додає 2 стартові плитки."""
@@ -157,6 +183,8 @@ class Game2048:
         self._board_prev: list[list[int]] = [[0] * N for _ in range(N)]
         self.score = 0
         self._score_prev = 0
+        self.moves = 0
+        self._moves_prev = 0
         self.state = "playing"
         self.add_random_tile()
         self.add_random_tile()
@@ -165,6 +193,7 @@ class Game2048:
         """Відкочує гру до попереднього стану поля та очок."""
         self.board = [row[:] for row in self._board_prev]
         self.score = self._score_prev
+        self.moves = self._moves_prev
         self.state = "playing"
 
     @staticmethod
@@ -196,6 +225,15 @@ class Game2048:
                 merged = False
         return row, gained
 
+    def _post_move(self, changed: bool) -> bool:
+        """Оновлює стан після ходу, якщо поле змінилося."""
+        if changed:
+            self.moves += 1
+            if self.score > self.best_score:
+                self.best_score = self.score
+                save_best_score(self.best_score)
+        return changed
+
     def _process_row(self, row: list[int]) -> tuple[list[int], int]:
         """Обробляє один рядок для ходу вліво: стискання, злиття, повторне стискання.
 
@@ -210,6 +248,7 @@ class Game2048:
         """Зберігає попередній стан поля та очок для можливого відкату ходу."""
         self._board_prev = [row[:] for row in self.board]
         self._score_prev = self.score
+        self._moves_prev = self.moves
 
 
 def main(page: ft.Page) -> None:
@@ -248,6 +287,12 @@ def main(page: ft.Page) -> None:
         weight=ft.FontWeight.BOLD,
         color=ft.Colors.BROWN_500,
     )
+    best_text = ft.Text(
+        value=f"Рекорд: {game.best_score}", size=14, color=ft.Colors.BROWN_500
+    )
+    moves_text = ft.Text(
+        value=f"Ходів: {game.best_score}", size=14, color=ft.Colors.BROWN_500
+    )
     status_text = ft.Text(
         "Стрілки - хід. BackSpace - Відміна ходу",
         size=16,
@@ -266,6 +311,8 @@ def main(page: ft.Page) -> None:
                 tile.content.size = tile_font_size(v)
                 tile.content.color = tile_text_color(v)
         score_text.value = f"Очки: {game.score}"
+        best_text.value = f"Рекорд: {game.best_score}"
+        moves_text.value = f"Ходів: {game.moves}"
         if game.state == "won":
             status_text.value = "YOU WON!"
         elif game.state == "lost":
@@ -351,8 +398,9 @@ def main(page: ft.Page) -> None:
             ft.Text(
                 "2048", size=48, weight=ft.FontWeight.BOLD, color=ft.Colors.BROWN_500
             ),
+            restart_btn,
             ft.Column(
-                controls=[score_text, restart_btn],
+                controls=[score_text, best_text, moves_text],
                 horizontal_alignment=ft.CrossAxisAlignment.END,
                 spacing=4,
             ),
