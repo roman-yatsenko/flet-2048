@@ -1,0 +1,703 @@
+import json
+import math
+import pathlib
+import random
+
+import asyncio
+import flet as ft
+
+SAVE_FILE = pathlib.Path(__file__).parent / "2048_save.json"
+
+N = 4
+TILE_SIZE = 100
+TILE_GAP = 10
+PADDING = 20
+
+BOARD_INNER = N * TILE_SIZE + (N + 0.5) * TILE_GAP
+BOARD_OUTER = BOARD_INNER + 2 * TILE_GAP
+WINDOW_WIDTH = BOARD_OUTER + 2 * PADDING
+WINDOW_HEIGHT = BOARD_OUTER + 2 * PADDING + 200
+
+WIN_VALUE = 2048
+WIN_STEPS = math.log2(WIN_VALUE)
+
+LIGHT_TILES: dict[int | str, ft.Colors] = {
+    0: ft.Colors.BROWN_100,
+    2: ft.Colors.ORANGE_50,
+    4: ft.Colors.ORANGE_100,
+    8: ft.Colors.ORANGE_300,
+    16: ft.Colors.DEEP_ORANGE_300,
+    32: ft.Colors.DEEP_ORANGE_400,
+    64: ft.Colors.DEEP_ORANGE_500,
+    128: ft.Colors.AMBER_300,
+    256: ft.Colors.AMBER_400,
+    512: ft.Colors.AMBER_500,
+    1024: ft.Colors.AMBER_600,
+    2048: ft.Colors.AMBER_700,
+    "big": ft.Colors.BROWN_900,
+}
+
+DARK_TILES: dict[int | str, ft.Colors] = {
+    0: ft.Colors.BLUE_900,
+    2: ft.Colors.DEEP_PURPLE_700,
+    4: ft.Colors.PURPLE_800,
+    8: ft.Colors.PURPLE_600,
+    16: ft.Colors.PURPLE_500,
+    32: ft.Colors.RED_600,
+    64: ft.Colors.RED_800,
+    128: ft.Colors.ORANGE_600,
+    256: ft.Colors.DEEP_ORANGE_700,
+    512: ft.Colors.AMBER_700,
+    1024: ft.Colors.YELLOW_700,
+    2048: ft.Colors.GREEN_400,
+    "big": ft.Colors.GREY_100,
+}
+
+THEMES: dict[str, dict] = {
+    "light": {
+        "tiles": LIGHT_TILES,
+        "page_bg": ft.Colors.BROWN_50,
+        "board_bg": ft.Colors.BROWN_200,
+        "txt": ft.Colors.BROWN_500,
+        "btn_bg": ft.Colors.BROWN_400,
+        "icon": "🌙",
+    },
+    "dark": {
+        "tiles": DARK_TILES,
+        "page_bg": ft.Colors.BLUE_GREY_900,
+        "board_bg": ft.Colors.INDIGO_900,
+        "txt": ft.Colors.GREY_300,
+        "btn_bg": ft.Colors.DEEP_PURPLE_700,
+        "icon": "☀️",
+    },
+}
+
+# Допоміжні функції
+
+
+def load_best_score() -> int:
+    """Завантажує найкращий рахунок із файлу збереження.
+
+    Повертає 0, якщо файл відсутній, містить невалідний JSON або значення
+    `best_score` неможливо перетворити на ціле число.
+    """
+    try:
+        data = json.loads(SAVE_FILE.read_text(encoding="utf-8"))
+        return int(data.get("best_score", 0))
+    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        return 0
+
+
+def save_best_score(score: int) -> None:
+    """Зберігає найкращий рахунок у файл збереження."""
+    SAVE_FILE.write_text(
+        json.dumps({"best_score": score}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def save_state(game: "Game2048") -> None:
+    """Зберігає поточний стан гри у файл збереження.
+
+    Зберігає такі поля:
+    - `best_score`: найкращий рахунок,
+    - `board`: поточний стан поля,
+    - `score`: поточний рахунок,
+    - `moves`: кількість зроблених ходів.
+    """
+    data = {
+        "best_score": game.best_score,
+        "board": game.board,
+        "score": game.score,
+        "moves": game.moves,
+    }
+    SAVE_FILE.write_text(
+        json.dumps(data, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def load_state() -> dict | None:
+    """Завантажує стан гри з файлу; повертає None, якщо дані некоректні або відсутні."""
+    try:
+        data = json.loads(SAVE_FILE.read_text(encoding="utf-8"))
+        if "board" in data:
+            return data
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def tile_text_color(value: int) -> str:
+    """Повертає колір тексту для значення плитки."""
+    return ft.Colors.BROWN_500 if value in (0, 2, 4) else ft.Colors.GREY_50
+
+
+def tile_font_size(value: int) -> int:
+    """Повертає розмір шрифту для значення плитки."""
+    if value < 100:
+        return 36
+    if value < 1000:
+        return 28
+    return 22
+
+
+def tile_bg_color(value: int, tiles: dict) -> ft.Colors:
+    """Повертає колір фону плитки за її значенням."""
+    return tiles.get(value, tiles["big"])
+
+
+class Game2048:
+    """Клас стану гри 2048: поле, очки та поточний статус."""
+
+    def __init__(self) -> None:
+        """Ініціалізує порожнє поле 4x4 та стартові значення гри."""
+        self.best_score: int = load_best_score()
+        self.win_value = WIN_VALUE
+        self.reset()
+
+    def add_random_tile(self) -> None:
+        """Додає випадкову плитку (2 або 4) у випадкову порожню клітинку поля."""
+        empty = [(r, c) for r in range(N) for c in range(N) if self.board[r][c] == 0]
+
+        if empty:
+            r, c = random.choice(empty)
+            self.board[r][c] = 2 if random.random() < 0.9 else 4
+
+    def check_lost(self) -> None:
+        """Перевіряє, чи більше немає доступних ходів, і встановлює `lost`."""
+        if self.state != "playing":
+            return
+        for r in range(N):
+            for c in range(N):
+                if self.board[r][c] == 0:
+                    return  # є порожня клітина
+                if c + 1 < N and self.board[r][c] == self.board[r][c + 1]:
+                    return  # є пара по горизонталі
+                if r + 1 < N and self.board[r][c] == self.board[r + 1][c]:
+                    return  # є пара по вертикалі
+        self.state = "lost"
+
+    def move_left(self) -> bool:
+        """Виконує хід вліво для всіх рядків поля.
+
+        Перед обробкою зберігає попередній стан для `undo()`. Для кожного
+        рядка застосовує стискання/злиття, додає набрані очки та визначає,
+        чи змінилося поле. Повертає `True`, якщо хоча б один рядок змінився.
+        """
+        self._save()
+        changed = False
+        for r in range(N):
+            new_row, gained = self._process_row(self.board[r][:])
+            self.score += gained
+            if new_row != self.board[r]:
+                changed = True
+            self.board[r] = new_row
+        return self._post_move(changed)
+
+    def move_right(self) -> bool:
+        """Виконує хід вправо для всіх рядків поля.
+
+        Перед обробкою зберігає попередній стан для `undo()`. Для кожного
+        рядка виконує обробку в реверсі (еквівалент ходу вліво), повертає
+        результат у вихідний порядок, додає набрані очки та визначає,
+        чи змінилося поле. Повертає `True`, якщо хоча б один рядок змінився.
+        """
+        self._save()
+        changed = False
+        for r in range(N):
+            new_row, gained = self._process_row(self.board[r][::-1])
+            new_row = new_row[::-1]
+            self.score += gained
+            if new_row != self.board[r]:
+                changed = True
+            self.board[r] = new_row
+        return self._post_move(changed)
+
+    def move_up(self) -> bool:
+        """Виконує хід вгору для всіх стовпців поля.
+
+        Перед обробкою зберігає попередній стан для `undo()`. Для кожного
+        стовпця застосовує стискання/злиття, додає набрані очки та визначає,
+        чи змінилося поле. Повертає `True`, якщо хоча б один стовпець змінився.
+        """
+        self._save()
+        changed = False
+        for c in range(N):
+            col = [self.board[r][c] for r in range(N)]
+            new_col, gained = self._process_row(col)
+            self.score += gained
+            if new_col != col:
+                changed = True
+            for r in range(N):
+                self.board[r][c] = new_col[r]
+        return self._post_move(changed)
+
+    def move_down(self) -> bool:
+        """Виконує хід вниз для всіх стовпців поля.
+
+        Перед обробкою зберігає попередній стан для `undo()`. Для кожного
+        стовпця виконує обробку у зворотному порядку (еквівалент ходу вгору),
+        повертає результат у вихідний порядок, додає набрані очки та визначає,
+        чи змінилося поле. Повертає `True`, якщо хоча б один стовпець змінився.
+        """
+        self._save()
+        changed = False
+        for c in range(N):
+            col = [self.board[r][c] for r in range(N)]
+            new_col, gained = self._process_row(col[::-1])
+            new_col = new_col[::-1]
+            self.score += gained
+            if new_col != col:
+                changed = True
+            for r in range(N):
+                self.board[r][c] = new_col[r]
+        return self._post_move(changed)
+
+    def reset(self) -> None:
+        """Скидає гру: очищає поле, обнуляє очки, стан та додає 2 стартові плитки."""
+        self.board: list[list[int]] = [[0] * N for _ in range(N)]
+        self._board_prev: list[list[int]] = [[0] * N for _ in range(N)]
+        self.score = 0
+        self._score_prev = 0
+        self.moves = 0
+        self._moves_prev = 0
+        self.state = "playing"
+        self.add_random_tile()
+        self.add_random_tile()
+
+    def undo(self) -> None:
+        """Відкочує гру до попереднього стану поля та очок."""
+        self.board = [row[:] for row in self._board_prev]
+        self.score = self._score_prev
+        self.moves = self._moves_prev
+        self.state = "playing"
+
+    @staticmethod
+    def _compress(row: list[int]) -> list[int]:
+        """Стискає рядок вліво: прибирає нулі та доповнює рядок нулями до довжини N."""
+        result = [x for x in row if x != 0]
+        result += [0] * (N - len(result))
+        return result
+
+    def _merge(self, row: list[int]) -> tuple[list[int], int]:
+        """Об'єднує сусідні однакові значення в рядку та рахує отримані очки.
+
+        Прохід виконується зліва направо. Якщо дві сусідні плитки рівні та
+        не були об'єднані на попередньому кроці, ліва плитка подвоюється,
+        права зануляється. Повертає змінений рядок і кількість очок,
+        набраних саме під час цього злиття.
+        """
+        gained = 0
+        merged = False
+        for i in range(N - 1):
+            if row[i] != 0 and row[i] == row[i + 1] and not merged:
+                row[i] *= 2
+                gained += row[i]
+                row[i + 1] = 0
+                merged = True
+                if row[i] >= self.win_value:
+                    self.state = "won"
+            else:
+                merged = False
+        return row, gained
+
+    def _post_move(self, changed: bool) -> bool:
+        """Оновлює стан після ходу, якщо поле змінилося."""
+        if changed:
+            self.moves += 1
+            if self.score > self.best_score:
+                self.best_score = self.score
+                save_best_score(self.best_score)
+        return changed
+
+    def _process_row(self, row: list[int]) -> tuple[list[int], int]:
+        """Обробляє один рядок для ходу вліво: стискання, злиття, повторне стискання.
+
+        Повертає оновлений рядок та кількість очок, набраних під час злиття.
+        """
+        row = self._compress(row)
+        row, gained = self._merge(row)
+        row = self._compress(row)
+        return row, gained
+
+    def _save(self) -> None:
+        """Зберігає попередній стан поля та очок для можливого відкату ходу."""
+        self._board_prev = [row[:] for row in self.board]
+        self._score_prev = self.score
+        self._moves_prev = self.moves
+
+
+def main(page: ft.Page) -> None:
+    """Головна функція, яка налаштовує вікно та інтерфейс гри."""
+    current_theme: list[str] = ["light"]
+    current_win: list[int] = [2048]
+
+    def theme() -> dict:
+        return THEMES[current_theme[0]]
+
+    page.title = "2048"
+    page.window.width = WINDOW_WIDTH
+    page.window.height = WINDOW_HEIGHT
+    page.window.resizable = False
+    page.bgcolor = theme()["page_bg"]
+    page.padding = ft.Padding.all(PADDING)
+
+    game = Game2048()
+
+    stats_dialog = ft.AlertDialog(
+        title=ft.Text("Статистика гри", weight=ft.FontWeight.BOLD),
+        content=ft.Text(""),
+        actions=[ft.Button("Закрити", on_click=lambda e: _close_dialog(e))],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+
+    def _close_dialog(e: ft.ControlEvent) -> None:
+        stats_dialog.open = False
+        page.update()
+
+    page.overlay.append(stats_dialog)
+
+    def build_stats_content() -> ft.Column:
+        """Повертає вміст діалогу зі статистикою гри."""
+        labels = [
+            ("Очки", str(game.score)),
+            ("Рекорд", str(game.best_score)),
+            ("Ходів", str(game.moves)),
+            (
+                "Стан гри",
+                {"playing": "Йде гра", "won": "Перемога!", "lost": "Програш"}.get(
+                    game.state, ""
+                ),
+            ),
+        ]
+        rows = [
+            ft.Row(
+                controls=[
+                    ft.Text(label, size=14, color=ft.Colors.BROWN_500, width=130),
+                    ft.Text(
+                        value,
+                        size=14,
+                        weight=ft.FontWeight.BOLD,
+                        color=ft.Colors.BROWN_500,
+                    ),
+                ]
+            )
+            for label, value in labels
+        ]
+        return ft.Column(controls=rows, spacing=8, tight=True)
+
+    def on_stats_click(e: ft.ControlEvent) -> None:
+        """Обробник кнопки статистики"""
+        stats_dialog.content = build_stats_content()
+        stats_dialog.open = True
+        page.update()
+
+    def make_tile(value: int) -> ft.Container:
+        """Створює візуальну плитку для заданого значення."""
+        return ft.Container(
+            width=TILE_SIZE,
+            height=TILE_SIZE,
+            bgcolor=tile_bg_color(value, theme()["tiles"]),
+            border_radius=8,
+            alignment=ft.Alignment.CENTER,
+            content=ft.Text(
+                value=str(value) if value else "",
+                size=tile_font_size(value),
+                weight=ft.FontWeight.BOLD,
+                color=tile_text_color(value),
+            ),
+        )
+
+    tile_controls: list[list[ft.Container]] = [
+        [make_tile(game.board[r][c]) for c in range(N)] for r in range(N)
+    ]
+    title_text = ft.Text(
+        "2048",
+        size=48,
+        weight=ft.FontWeight.BOLD,
+        color=theme()["txt"],
+    )
+    score_text = ft.Text(
+        f"Очки: {game.score}",
+        size=20,
+        weight=ft.FontWeight.BOLD,
+        color=theme()["txt"],
+    )
+    best_text = ft.Text(
+        value=f"Рекорд: {game.best_score}", size=14, color=theme()["txt"]
+    )
+    moves_text = ft.Text(
+        value=f"Ходів: {game.best_score}", size=14, color=theme()["txt"]
+    )
+    status_text = ft.Text(
+        "Стрілки - хід. BackSpace - Відміна ходу",
+        size=16,
+        color=theme()["txt"],
+        text_align=ft.TextAlign.CENTER,
+    )
+    progress_bar = ft.ProgressBar(
+        value=0,
+        width=BOARD_OUTER,
+        color=ft.Colors.AMBER_600,
+        bgcolor=ft.Colors.BROWN_100,
+    )
+
+    def refresh_ui(msg: str = "") -> None:
+        """Оновлює значення плиток і текст очок в інтерфейсі."""
+        max_val = max(game.board[r][c] for r in range(N) for c in range(N))
+        for r in range(N):
+            for c in range(N):
+                v = game.board[r][c]
+                tile = tile_controls[r][c]
+                tile.bgcolor = tile_bg_color(v, theme()["tiles"])
+                tile.content.value = str(v) if v else ""
+                tile.content.size = tile_font_size(v)
+                tile.content.color = tile_text_color(v)
+                tile.border = (
+                    ft.Border.all(3, ft.Colors.AMBER_700)
+                    if v == max_val and v > 0
+                    else None
+                )
+        score_text.value = f"Очки: {game.score}"
+        best_text.value = f"Рекорд: {game.best_score}"
+        moves_text.value = f"Ходів: {game.moves}"
+        if game.state == "won":
+            status_text.value = "YOU WON!"
+        elif game.state == "lost":
+            status_text.value = "GAME OVER"
+        else:
+            status_text.value = msg or "Стрілки - хід. BackSpace - Відміна ходу"
+        progress_bar.value = (
+            math.log2(max_val) / math.log2(current_win[0]) if max_val else 0
+        )
+        page.update()
+
+    refresh_ui()
+
+    grid = ft.Container(
+        content=ft.Column(
+            controls=[
+                ft.Row(controls=tile_controls[r], spacing=TILE_GAP) for r in range(N)
+            ],
+            spacing=TILE_GAP,
+        ),
+        bgcolor=theme()["board_bg"],
+        padding=ft.Padding.all(TILE_GAP),
+        border_radius=8,
+    )
+
+    btn_style = ft.ButtonStyle(
+        bgcolor={"": theme()["btn_bg"]}, color={"": ft.Colors.GREY_50}
+    )
+
+    def on_move(direction: str):
+        """Обробник ходу."""
+        fns = {
+            "left": game.move_left,
+            "right": game.move_right,
+            "up": game.move_up,
+            "down": game.move_down,
+        }
+
+        def handler(e: ft.ControlEvent) -> None:
+            if game.state == "lost":
+                return
+            if fns[direction]():
+                game.add_random_tile()
+                game.check_lost()
+                refresh_ui()
+
+        return handler
+
+    def on_undo(e: ft.ControlEvent) -> None:
+        """Обробник повернення ходу"""
+        if game.state != "lost":
+            game.undo()
+            refresh_ui()
+
+    def on_restart(e: ft.ControlEvent) -> None:
+        """Перезапускає гру та оновлює інтерфейс."""
+        game.reset()
+        refresh_ui("Стрілки або кнопки для ходу")
+
+    def on_continue(e: ft.ControlEvent) -> None:
+        state = load_state()
+        if state:
+            game.board = state["board"]
+            game.score = state["score"]
+            game.moves = state["moves"]
+            game.best_score = state.get("best_score", game.best_score)
+            game.state = "playing"
+            continue_btn.disabled = True
+            refresh_ui("Гру відновлено")
+
+    hint_active: list[bool] = [False]
+
+    def find_mergeable() -> set[tuple[int, int]]:
+        """Повертає множину позицій плиток із однаковими сусідніми."""
+        result = set()
+        for r in range(N):
+            for c in range(N):
+                v = game.board[r][c]
+                if v == 0:
+                    continue
+                if c + 1 < N and game.board[r][c + 1] == v:
+                    result.add((r, c))
+                    result.add((r, c + 1))
+                if r + 1 < N and game.board[r + 1][c] == v:
+                    result.add((r, c))
+                    result.add((r + 1, c))
+        return result
+
+    async def clear_hint_after_delay() -> None:
+        """Асинхронно знімає підсвічування через 2 секунди."""
+        await asyncio.sleep(2)
+        if not hint_active[0]:
+            return
+        hint_active[0] = False
+        for r in range(N):
+            for c in range(N):
+                tile_controls[r][c].border = None
+        page.update()
+
+    def on_hint(e: ft.ControlEvent) -> None:
+        """Підсвічує плитки які можуть злитись на 2 секунди."""
+        if game.state != "playing":
+            return
+        cells = find_mergeable()
+        hint_active[0] = True
+        for r in range(N):
+            for c in range(N):
+                tile_controls[r][c].border = (
+                    ft.border.all(3, ft.Colors.GREEN_400) if (r, c) in cells else None
+                )
+        page.update()
+        # Автоматично зняти підсвічування через 2 секунди
+        page.run_task(clear_hint_after_delay)
+
+    def on_win_change(e: ft.ControlEvent) -> None:
+        current_win[0] = int(win_dropdown.value)
+        game.reset()
+        refresh_ui(f"Ціль: {current_win[0]}")
+
+    win_dropdown = ft.Dropdown(
+        value="2048",
+        width=110,
+        options=[
+            ft.dropdown.Option("256"),
+            ft.dropdown.Option("512"),
+            ft.dropdown.Option("1024"),
+            ft.dropdown.Option("2048"),
+        ],
+        on_text_change=on_win_change,
+    )
+
+    def apply_theme() -> None:
+        """Застосовує поточну тему до елементів інтерфейсу."""
+        t = theme()
+        page.bgcolor = t["page_bg"]
+        grid.bgcolor = t["board_bg"]
+        new_style = ft.ButtonStyle(
+            bgcolor={"": t["btn_bg"]}, color={"": ft.Colors.GREY_50}
+        )
+        for btn in [restart_btn, themes_btn, stats_btn, continue_btn, hint_btn]:
+            btn.style = new_style
+        for ctrl in [title_text, score_text, best_text, moves_text, status_text]:
+            ctrl.color = t["txt"]
+        themes_btn.content = t["icon"]
+        win_dropdown.bgcolor = t["btn_bg"]
+        win_dropdown.color = ft.Colors.GREY_50
+
+    def on_theme_toggle(e: ft.ControlEvent) -> None:
+        """Обробник перемикання теми"""
+        current_theme[0] = "dark" if current_theme[0] == "light" else "light"
+        apply_theme()
+        refresh_ui()
+
+    restart_btn = ft.Button(
+        content="🔁",
+        on_click=on_restart,
+        style=btn_style,
+    )
+    stats_btn = ft.Button(
+        content="📈",
+        on_click=on_stats_click,
+        style=btn_style,
+    )
+    continue_btn = ft.Button(
+        content="▶️",
+        on_click=on_continue,
+        style=btn_style,
+        disabled=load_state() is None,
+    )
+    hint_btn = ft.Button(
+        content="💡",
+        on_click=on_hint,
+        style=btn_style,
+    )
+    themes_btn = ft.Button(
+        content=theme()["icon"], on_click=on_theme_toggle, style=btn_style
+    )
+
+    MOVES = {
+        "Arrow Up": game.move_up,
+        "Arrow Down": game.move_down,
+        "Arrow Left": game.move_left,
+        "Arrow Right": game.move_right,
+    }
+
+    def on_key(e: ft.KeyboardEvent) -> None:
+        if e.key == "Backspace" and game.state != "lost":
+            game.undo()
+            refresh_ui()
+            return
+        if game.state == "lost":
+            return
+        move_fn = MOVES.get(e.key)
+        if move_fn and move_fn():
+            game.add_random_tile()
+            game.check_lost()
+            hint_active[0] = False
+            refresh_ui()
+            save_state(game)
+            continue_btn.disabled = False
+
+    page.on_keyboard_event = on_key
+
+    header = ft.Row(
+        controls=[
+            title_text,
+            win_dropdown,
+            ft.Column(
+                controls=[score_text, best_text, moves_text],
+                horizontal_alignment=ft.CrossAxisAlignment.END,
+                spacing=4,
+            ),
+        ],
+        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+    )
+    buttons_row = ft.Row(
+        controls=[restart_btn, stats_btn, continue_btn, hint_btn],
+        vertical_alignment=ft.MainAxisAlignment.SPACE_EVENLY,
+    )
+    status_row = ft.Row(
+        controls=[status_text, themes_btn], alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+    )
+
+    page.add(
+        ft.Column(
+            controls=[
+                header,
+                buttons_row,
+                grid,
+                progress_bar,
+                status_row,
+            ],
+            spacing=10,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+    )
+
+
+ft.run(main)
